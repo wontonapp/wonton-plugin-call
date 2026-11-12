@@ -1,0 +1,27 @@
+# 声明（NOTICE）
+
+## 插件包
+
+插件包本身（compose 清单、nginx 配置、网页配置、README、图标）按本仓库的 MIT 许可证分发，见 [LICENSE](LICENSE)。
+
+## 图标
+
+`icon.svg` 是本仓库原创的简笔图标，按本仓库 MIT 许可证分发，不使用上游素材。
+
+*Element Call*、*Element*、*Matrix*、*LiveKit* 及相关名称是各自权利人的商标。本插件是社区作品，与 Element Creations Ltd.、LiveKit, Inc. 没有从属或背书关系。
+
+## 上游镜像
+
+三个服务都运行上游官方镜像，插件包本身不含上游代码。
+
+| 镜像 | 许可证 | 源码 |
+| --- | --- | --- |
+| `ghcr.io/element-hq/element-call` | AGPL-3.0-only | https://github.com/element-hq/element-call |
+| `ghcr.io/element-hq/lk-jwt-service` | AGPL-3.0-only | https://github.com/element-hq/lk-jwt-service |
+| `livekit/livekit-server` | Apache-2.0 | https://github.com/livekit/livekit |
+
+AGPL-3.0 全文见 https://www.gnu.org/licenses/agpl-3.0.txt ，Apache-2.0 全文见 https://www.apache.org/licenses/LICENSE-2.0 。
+
+Element Call 和 lk-jwt-service 的版权归 Element Creations Ltd. 所有，LiveKit 的版权归 LiveKit, Inc. 所有。它们作为独立容器运行，插件包不修改也不重新分发它们的源码。
+
+镜像基底随镜像一起分发，许可证以各自上游为准：`ghcr.io/element-hq/element-call` 和 `livekit/livekit-server` 用 Alpine Linux（各软件包按上游各自许可）。

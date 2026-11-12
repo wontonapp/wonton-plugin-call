@@ -1,5 +1,5 @@
-# 通话插件（ADR-0096）：Element Call 网页 + LiveKit SFU + lk-jwt-service 授权服务。
-# 信令和授权都经网关走标准地址：页面同源的 /livekit/sfu 反代到 livekit:7880，
+# 视频通话插件：Element Call 网页 + LiveKit SFU + lk-jwt-service 授权服务。
+# 信令和授权都走网关的标准地址：页面同源的 /livekit/sfu 反代到 livekit:7880，
 # Matrix 对外地址下的 /_wonton/matrix-rtc 由核心转给 jwt:8080（清单 provides.matrix_rtc）。
 # 媒体端口经隧道映射到手机本机同号端口（清单 tunnel.ports），7880 不出插件网络。
 name: call
@@ -17,7 +17,8 @@ services:
       # keys 旗标要求恰好 "key: secret" 的写法（空格不能省）
       LIVEKIT_KEYS: "wonton: ${WONTON_SECRET_LIVEKIT_SECRET}"
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/metrics"]
+      # / 是 LiveKit 自己的就绪检查：节点统计超过 4 秒没更新就回 406
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -31,9 +32,14 @@ services:
       LIVEKIT_KEY: wonton
       LIVEKIT_SECRET: ${WONTON_SECRET_LIVEKIT_SECRET}
       LIVEKIT_FULL_ACCESS_HOMESERVERS: ${WONTON_MATRIX_SERVER_NAME}
+      # 页面要能改自己的显示名和静音状态
+      LIVEKIT_CAN_UPDATE_OWN_METADATA: "true"
       # 代管断线后的 delayed leave：客户端接口指回服务器名的核心别名
       LIVEKIT_CS_API_URL_OVERRIDES: ${WONTON_MATRIX_SERVER_NAME}=https://${WONTON_MATRIX_SERVER_NAME}
       SSL_CERT_FILE: /etc/wonton-ca/ca-bundle.pem
+    depends_on:
+      livekit:
+        condition: service_healthy
     volumes:
       - ${WONTON_MATRIX_CA_DIR}:/etc/wonton-ca:ro
     healthcheck:
@@ -74,7 +80,7 @@ x-wonton:
   author: { name: Wonton }
   homepage: https://github.com/wontonapp/wonton-plugin-call
   license: AGPL-3.0-only
-  notices: [NOTICE.md]
+  notices: [NOTICE]
   tags: { zh: [通讯], en: [Communication] }
   about:
     zh: |
@@ -99,29 +105,39 @@ x-wonton:
     # baseUrl 必填；$org.wonton.page_origin 由核心替换成页面自己的 origin。
     url: /room?widgetId=$matrix_widget_id&roomId=$matrix_room_id&parentUrl=$org.wonton.page_origin&userId=$matrix_user_id&deviceId=$org.matrix.msc2873.matrix_device_id&baseUrl=$org.matrix.msc4039.matrix_base_url&intent=join_existing
     entry: video_call
+    # 能力串照 matrix-rust-sdk 0.19.1 的 get_element_call_required_permissions 逐条写。SDK 把
+    # m.call.member 解析成 org.matrix.msc3401.call.member，这里用 SDK 认的写法。
     capabilities:
-      # 读写状态事件：房间里谁在通话（MSC4143）、成员、房间名、加密开关
+      # 只读状态事件：房间里谁在通话（MSC4143）、房间名（标题栏）、成员（有人掉线时更新画面）、
+      # 加密开关（决定要不要端到端加密）、房间版本（MSC3779 的授权规则）
       - org.matrix.msc2762.receive.state_event:org.matrix.msc3401.call.member
-      - org.matrix.msc2762.send.state_event:org.matrix.msc3401.call.member
-      - org.matrix.msc2762.receive.state_event:m.room.member
       - org.matrix.msc2762.receive.state_event:m.room.name
+      - org.matrix.msc2762.receive.state_event:m.room.member
       - org.matrix.msc2762.receive.state_event:m.room.encryption
       - org.matrix.msc2762.receive.state_event:m.room.create
-      # 消息类事件：举手等回应和撤回、通话拒绝通知
-      - org.matrix.msc2762.receive.event:m.reaction
-      - org.matrix.msc2762.send.event:m.reaction
-      - org.matrix.msc2762.receive.event:m.room.redaction
-      - org.matrix.msc2762.send.event:m.room.redaction
-      - org.matrix.msc2762.send.event:m.rtc.notification
-      - org.matrix.msc2762.send.event:m.call.notify
-      - org.matrix.msc2762.receive.event:m.rtc.decline
-      # 加密房间的媒体密钥经 to-device 事件交换（也在消息类事件里带一份）
-      - org.matrix.msc3819.receive.to_device:io.element.call.encryption_keys
-      - org.matrix.msc3819.send.to_device:io.element.call.encryption_keys
+      # 读写同一组消息类事件：向其他成员要日志和媒体密钥（含旧版的加密密钥事件）、
+      # 自定义通话回应和举手、撤回、拒接
+      - org.matrix.msc2762.receive.event:org.matrix.rageshake_request
+      - org.matrix.msc2762.send.event:org.matrix.rageshake_request
       - org.matrix.msc2762.receive.event:io.element.call.encryption_keys
       - org.matrix.msc2762.send.event:io.element.call.encryption_keys
       - org.matrix.msc2762.receive.event:io.element.call.reaction
       - org.matrix.msc2762.send.event:io.element.call.reaction
+      - org.matrix.msc2762.receive.event:m.reaction
+      - org.matrix.msc2762.send.event:m.reaction
+      - org.matrix.msc2762.receive.event:m.room.redaction
+      - org.matrix.msc2762.send.event:m.room.redaction
+      - org.matrix.msc2762.receive.event:m.rtc.decline
+      - org.matrix.msc2762.send.event:m.rtc.decline
+      # 只发消息类事件：开始通话的通知，含 Element Call 还在发的旧版类型
+      - org.matrix.msc2762.send.event:m.rtc.notification
+      - org.matrix.msc2762.send.event:m.call.notify
+      # 发自己的通话成员状态：state_key 由页面在运行时拼（自己、自己加装置号、再加 _m.call、前面加 _），
+      # 所以这里不写死 state_key，核心按“是自己的”逐条收窄
+      - org.matrix.msc2762.send.state_event:org.matrix.msc3401.call.member
+      # 加密房间的媒体密钥经 to-device 事件交换（消息类事件里也带一份，见上）
+      - org.matrix.msc3819.receive.to_device:io.element.call.encryption_keys
+      - org.matrix.msc3819.send.to_device:io.element.call.encryption_keys
       # 标志位：通话中保持亮屏、拿通话服务器地址、断线后的定时退场、凭 OpenID 换通话钥匙
       - io.element.requires_client
       - m.always_on_screen

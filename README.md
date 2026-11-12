@@ -1,25 +1,49 @@
-# 通话插件（Element Call）
+# 家庭视频通话（Element Call）
 
-给 [Wonton](https://github.com/wontonapp/wonton) 装视频通话用的插件：家人在 App 聊天房间的顶栏点通话按钮，就能互相打视频电话。形态按 [ADR-0096](https://github.com/wontonapp/wonton/blob/main/docs/adr/0096-calls-matrixrtc-widget.md)（MatrixRTC + LiveKit，Element Call 网页作为 Matrix widget 跑在插件页里）。
+和家人打视频电话，像微信视频一样：在家里 App 的聊天房间顶上点一下通话按钮，画面和声音就通上。画面和声音都走家里自己的服务器，不经过外面的平台。
 
-## 结构
+开发流程见[插件开发指南](https://github.com/wontonapp/wonton-docs/blob/main/develop.md)，清单字段以[插件规范](https://github.com/wontonapp/wonton-docs/blob/main/plugin-spec.md)为准。
 
-| 服务 | 镜像（固定摘要） | 许可证 | 作用 |
-| --- | --- | --- | --- |
-| `livekit` | `livekit/livekit-server:v1.13.11@sha256:25cd902d…` | Apache-2.0 | 转发画面和声音。`rtc.node_ip: 127.0.0.1`、UDP mux 7882、TCP 7881、房间不自动建 |
-| `jwt` | `ghcr.io/element-hq/lk-jwt-service:0.9.0@sha256:d210fd77…` | AGPL-3.0 | MSC4195 授权服务：验 Matrix OpenID 令牌换 LiveKit 令牌，代管断线后的 delayed leave（独立模式） |
-| `web` | `ghcr.io/element-hq/element-call:v0.28.2@sha256:c61fc9e4…` | AGPL-3.0 | Element Call 网页，插件的网页入口；同一入口把 `/livekit/sfu` 反代到 `livekit:7880` |
+## 怎么用
 
-- 信令和授权都走标准地址，不开额外端口：页面同源的 `/livekit/sfu`（`call-nginx.conf`），和 Matrix 对外地址下的 `/_wonton/matrix-rtc`（清单 `provides.matrix_rtc`，由核心转发）。
-- 媒体端口经清单 `tunnel.ports` 映射到手机本机同号端口（ADR-0072）：UDP 7882、TCP 7881。7880 只在插件网络里。
-- Element Call 的运行配置 `call-config.json` 不配任何遥测（posthog、sentry、rageshake 都不设）。
-- LiveKit 的 API 密钥来自清单 `secrets`（核心生成、只注入给用到的容器）。
-- 许可和来源见 [NOTICE.md](NOTICE.md)；插件包自身以 MIT 提供（见 [LICENSE](LICENSE)），上游软件按各自许可作为独立容器运行。
+1. 安装插件，等它装完。
+2. 打开任意一个聊天房间，点顶栏的通话按钮；第一次会问一次摄像头和麦克风的使用许可。
+3. 对面的人在同一房间点通话按钮就进来了。挂断点页面里的红色按钮。
 
-## 校验
+人不在家也能打，前提是家里服务器开了外网访问。页面里有一份通话成员列表，谁在通话里一眼能看到。
 
-```sh
-wonton-core plugin check <本目录> --official
-```
+## 通话是怎么通起来的
 
-`matrix_widget` 字段按 wontonapp/wonton#407 的实现写，`plugin check` 要用含 #407 的核心构建（spec 0.14 的 `matrix_widget`）。
+装的是三个现成的开源软件，各管一段：
+
+- 网页是 [Element Call](https://github.com/element-hq/element-call)（AGPL-3.0）：拨号、成员、挂断这些都在它的页面里。
+- 画面和声音由 [LiveKit](https://github.com/livekit/livekit)（Apache-2.0）在家里转发，不落盘。
+- 通话钥匙由 [lk-jwt-service](https://github.com/element-hq/lk-jwt-service)（AGPL-3.0）按登录身份发放，别人拿不到。
+
+网页和信令和 App 走同一个地址，不用另开端口；画面和声音的两个端口只在通话时映射到配对的手机上，挂了就撤。加密房间里通话的媒体密钥只发给通话中的人。
+
+## 数据在哪
+
+通话本身不存录像，聊天记录还在原来的房间里。插件自己的通话密钥由云吞生成保管，升级、重装都沿用；卸载时选择删除数据才清掉。
+
+## 已知限制
+
+- 在云吞 App 里打，不在系统浏览器里打。
+- 手机屏幕锁上或 App 退到后台太久，通话会断；回来再拨一次。
+- iPhone 上还没实测过。
+- 屏幕共享这一版没做。
+
+## 文件
+
+| 路径 | 内容 |
+| --- | --- |
+| `docker-compose.yml` | 插件本身：三个服务、清单、隧道端口和通话服务器地址 |
+| `call-nginx.conf` | 网页入口的 nginx 配置，把信令反代给 LiveKit |
+| `call-config.json` | Element Call 的运行配置 |
+| `icon.svg` | 插件图标 |
+| `scripts/check.sh` | 检查插件包，规则和安装时一样 |
+| `scripts/dev.sh` | 开发环境：起一套云吞，装、重装、卸载插件，看日志 |
+
+## 图标
+
+`icon.svg` 为本仓库原创的简笔图标，按本仓库 MIT 许可证分发，见 [NOTICE](NOTICE)。
