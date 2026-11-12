@@ -1,0 +1,147 @@
+# 通话插件（ADR-0096）：Element Call 网页 + LiveKit SFU + lk-jwt-service 授权服务。
+# 信令和授权都经网关走标准地址：页面同源的 /livekit/sfu 反代到 livekit:7880，
+# Matrix 对外地址下的 /_wonton/matrix-rtc 由核心转给 jwt:8080（清单 provides.matrix_rtc）。
+# 媒体端口经隧道映射到手机本机同号端口（清单 tunnel.ports），7880 不出插件网络。
+name: call
+services:
+  livekit:
+    image: livekit/livekit-server:v1.13.11@sha256:25cd902de7cacbd5f1f779f6a6ac1eae20ba8f56b0935934ce6b0ab80d1e3d20
+    environment:
+      # CLI 旗标的 env 写法（pkg/config/config.go 的 GenerateCLIFlags）：
+      # node-ip、udp-port 是手写旗标（NODE_IP、UDP_PORT），rtc.tcp_port、room.auto_create 走
+      # yaml 路径生成的 LIVEKIT_RTC_TCP_PORT、LIVEKIT_ROOM_AUTO_CREATE。
+      NODE_IP: 127.0.0.1
+      UDP_PORT: "7882"
+      LIVEKIT_RTC_TCP_PORT: "7881"
+      LIVEKIT_ROOM_AUTO_CREATE: "false"
+      # keys 旗标要求恰好 "key: secret" 的写法（空格不能省）
+      LIVEKIT_KEYS: "wonton: ${WONTON_SECRET_LIVEKIT_SECRET}"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  jwt:
+    image: ghcr.io/element-hq/lk-jwt-service:0.9.0@sha256:d210fd778ba38b7e42e6fc64e8a24a7d66ccc3b938fb20d73bd713224af2dfea
+    environment:
+      # 发给客户端的 SFU 地址：和插件页同源，经网页入口的反代到 livekit:7880
+      LIVEKIT_URL: ${WONTON_APP_URL}/livekit/sfu
+      LIVEKIT_KEY: wonton
+      LIVEKIT_SECRET: ${WONTON_SECRET_LIVEKIT_SECRET}
+      LIVEKIT_FULL_ACCESS_HOMESERVERS: ${WONTON_MATRIX_SERVER_NAME}
+      # 代管断线后的 delayed leave：客户端接口指回服务器名的核心别名
+      LIVEKIT_CS_API_URL_OVERRIDES: ${WONTON_MATRIX_SERVER_NAME}=https://${WONTON_MATRIX_SERVER_NAME}
+      SSL_CERT_FILE: /etc/wonton-ca/ca-bundle.pem
+    volumes:
+      - ${WONTON_MATRIX_CA_DIR}:/etc/wonton-ca:ro
+    healthcheck:
+      # scratch 镜像自带的健康检查程序（GET 本机 /healthz）
+      test: ["CMD", "/lk-jwt-service-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  web:
+    image: ghcr.io/element-hq/element-call:v0.28.2@sha256:c61fc9e4e04f75690c693d4556d01c09a2b9246f3fc8d35222d3aac36ba29906
+    depends_on:
+      livekit:
+        condition: service_healthy
+    configs:
+      - source: nginx-conf
+        target: /etc/nginx/conf.d/default.conf
+      - source: ec-config
+        target: /app/config.json
+
+configs:
+  nginx-conf:
+    file: ./call-nginx.conf
+  ec-config:
+    file: ./call-config.json
+
+x-wonton:
+  spec: "0.14"
+  id: app.element-call
+  version: 0.1.0
+  kind: app
+  title: { zh: 和家人视频通话（Element Call）, en: Family Video Calls (Element Call) }
+  description:
+    zh: 像微信视频通话，家人在手机上点一下就能打视频电话。画面和声音都走家里自己的服务器，不经过外面的平台。
+    en: Video calls for the whole family, like FaceTime, but running on your own home server.
+  icon: icon.svg
+  author: { name: Wonton }
+  homepage: https://github.com/wontonapp/wonton-plugin-call
+  license: AGPL-3.0-only
+  notices: [NOTICE.md]
+  tags: { zh: [通讯], en: [Communication] }
+  about:
+    zh: |
+      和家人打视频电话，像微信视频一样：打开 App，在聊天房间顶栏点通话按钮就开始。第一次打开会问一次摄像头和麦克风的使用许可。
+
+      画面和声音都走家里自己的服务器，不经过外面的平台；人不在家时也能打，前提是家里的服务器开了外网访问。
+
+      这个插件装的是三个现成的开源软件：网页是 Element Call（AGPL-3.0，源码 github.com/element-hq/element-call），转发画面和声音的是 LiveKit（Apache-2.0，源码 github.com/livekit/livekit），发放通话钥匙的是 lk-jwt-service（AGPL-3.0，源码 github.com/element-hq/lk-jwt-service）。
+    en: |
+      Video calls with your family, like FaceTime: open the app and tap the call button at the top of a chat room. The app asks for camera and microphone permission the first time.
+
+      Audio and video go through your own home server, not a third-party platform; calls also work away from home when the server is reachable from the internet.
+
+      This plugin installs three ready-made open-source projects: the web page is Element Call (AGPL-3.0, source at github.com/element-hq/element-call), media is relayed by LiveKit (Apache-2.0, source at github.com/livekit/livekit), and call tokens are issued by lk-jwt-service (AGPL-3.0, source at github.com/element-hq/lk-jwt-service).
+  release_notes: { zh: 第一个版本。, en: First release. }
+  webui:
+    service: web
+    port: 8080
+    health: /
+  matrix_widget:
+    # Element Call 的 widget 参数（docs/url_params.md）：widgetId、parentUrl、userId、deviceId、
+    # baseUrl 必填；$org.wonton.page_origin 由核心替换成页面自己的 origin。
+    url: /room?widgetId=$matrix_widget_id&roomId=$matrix_room_id&parentUrl=$org.wonton.page_origin&userId=$matrix_user_id&deviceId=$org.matrix.msc2873.matrix_device_id&baseUrl=$org.matrix.msc4039.matrix_base_url&intent=join_existing
+    entry: video_call
+    capabilities:
+      # 读写状态事件：房间里谁在通话（MSC4143）、成员、房间名、加密开关
+      - org.matrix.msc2762.receive.state_event:org.matrix.msc3401.call.member
+      - org.matrix.msc2762.send.state_event:org.matrix.msc3401.call.member
+      - org.matrix.msc2762.receive.state_event:m.room.member
+      - org.matrix.msc2762.receive.state_event:m.room.name
+      - org.matrix.msc2762.receive.state_event:m.room.encryption
+      - org.matrix.msc2762.receive.state_event:m.room.create
+      # 消息类事件：举手等回应和撤回、通话拒绝通知
+      - org.matrix.msc2762.receive.event:m.reaction
+      - org.matrix.msc2762.send.event:m.reaction
+      - org.matrix.msc2762.receive.event:m.room.redaction
+      - org.matrix.msc2762.send.event:m.room.redaction
+      - org.matrix.msc2762.send.event:m.rtc.notification
+      - org.matrix.msc2762.send.event:m.call.notify
+      - org.matrix.msc2762.receive.event:m.rtc.decline
+      # 加密房间的媒体密钥经 to-device 事件交换（也在消息类事件里带一份）
+      - org.matrix.msc3819.receive.to_device:io.element.call.encryption_keys
+      - org.matrix.msc3819.send.to_device:io.element.call.encryption_keys
+      - org.matrix.msc2762.receive.event:io.element.call.encryption_keys
+      - org.matrix.msc2762.send.event:io.element.call.encryption_keys
+      - org.matrix.msc2762.receive.event:io.element.call.reaction
+      - org.matrix.msc2762.send.event:io.element.call.reaction
+      # 标志位：通话中保持亮屏、拿通话服务器地址、断线后的定时退场、凭 OpenID 换通话钥匙
+      - io.element.requires_client
+      - m.always_on_screen
+      - org.matrix.msc4039.download_file
+      - org.matrix.msc4157.send.delayed_event
+      - org.matrix.msc4157.update_delayed_event
+      - org.matrix.msc4407.receive.sticky_event
+      - org.matrix.msc4407.send.sticky_event
+      - org.matrix.msc4515.rtc_transports
+      - org.matrix.msc4533.rtc_livekit_delegate_delayed_leave
+      - org.matrix.msc4533.rtc_livekit_get_token
+  tunnel:
+    ports:
+      - { service: livekit, port: 7882, protocol: udp }
+      - { service: livekit, port: 7881, protocol: tcp }
+  provides:
+    matrix_rtc: { service: jwt, port: 8080 }
+  secrets:
+    livekit_secret:
+      generate: { bytes: 32, encoding: hex }
+  requirements:
+    arch: [amd64, arm64]
+  permissions: []
