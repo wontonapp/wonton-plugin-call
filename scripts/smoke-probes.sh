@@ -12,7 +12,8 @@ web_assert() { # 页面是 Element Call 自己的页面
 extra_check() {
   local body
   # 信令和网页同源：反向代理必须真的到了 LiveKit。节点统计就绪前 / 回 406 Not Ready，也算到了。
-  body="$(dweb /livekit/sfu/)" || { extra_item FAIL "SFU 反代" "请求失败：$(head -c 200 <<<"$body")"; return; }
+  # 就绪前回 406，`--fail-with-body` 也让 curl 非 0，所以不看退出码，只看回来的是不是 LiveKit。
+  body="$(dweb /livekit/sfu/)" || :
   if grep -qE '^(OK|Not Ready)' <<<"$body"; then
     extra_item PASS "SFU 反代" "回的是 LiveKit 自己的就绪检查：$(head -c 40 <<<"$body")"
   else
