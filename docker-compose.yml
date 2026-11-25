@@ -51,7 +51,7 @@ services:
       start_period: 10s
 
   web:
-    image: ghcr.io/element-hq/element-call:v0.28.2@sha256:c61fc9e4e04f75690c693d4556d01c09a2b9246f3fc8d35222d3aac36ba29906
+    image: ghcr.io/element-hq/element-call:v0.29.0@sha256:886e00047b4e1235fdf30e6eeeca379305d974345b8b74dff8c5146f24aa6f5a
     depends_on:
       livekit:
         condition: service_healthy
