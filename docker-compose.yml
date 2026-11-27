@@ -68,11 +68,12 @@ configs:
     file: ./call-config.json
 
 x-wonton:
-  spec: "0.14"
+  spec: "0.17"
   id: app.element-call
   version: 0.1.0
   kind: app
-  title: { zh: 和家人视频通话（Element Call）, en: Family Video Calls (Element Call) }
+  title: { en: "Element Call" }
+  subtitle: { zh: "家人视频通话", en: "Family Video Calls" }
   description:
     zh: 像微信视频通话，家人在手机上点一下就能打视频电话。画面和声音都走家里自己的服务器，不经过外面的平台。
     en: Video calls for the whole family, like FaceTime, but running on your own home server.
